@@ -78,7 +78,7 @@ def correlation_analysis(data):
   correlation_matrix = app_data.corr()
   
   plt.figure(figsize=(12, 8))
-  sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt='.2f')
+  sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt='.3f')
   plt.title('Correlation Matrix for Application Data')
   plt.show()
 
