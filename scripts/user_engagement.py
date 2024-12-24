@@ -12,7 +12,11 @@ def aggregate_metrics(df):
     'Dur. (ms)': 'sum',   # Total session duration
     'Total UL (Bytes)': 'sum',
     'Total DL (Bytes)': 'sum'  # Total traffic (upload + download)
-  })
+  }).reset_index()
+
+  # Create a copy of the 'Bearer Id' column with the raw values
+  bearer_ids = df.groupby('MSISDN/Number')['Bearer Id'].first().reset_index(name='Bearer Id')
+
   metrics.rename(columns={
     'Bearer Id': 'Sessions Frequency',
     'Dur. (ms)': 'Total Duration (ms)',
@@ -20,6 +24,8 @@ def aggregate_metrics(df):
     'Total DL (Bytes)': 'Total DL (Bytes)'
   }, inplace=True)
   metrics['Total Traffic (Bytes)'] = metrics['Total UL (Bytes)'] + metrics['Total DL (Bytes)']
+  # Merge the metrics DataFrame with the Bearer Id List
+  metrics = pd.merge(metrics, bearer_ids, on='MSISDN/Number', how='left')
   return metrics
 
 def top_customers(metrics, metric):

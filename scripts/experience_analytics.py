@@ -9,6 +9,7 @@ def aggregate_per_customer(df):
   - Average RTT (sum of DL and UL RTT).
   - Handset type (mode).
   - Average throughput (sum of DL and UL throughput).
+  - User ID (Bearer Id).
 
   Parameters:
     df (pd.DataFrame): The input dataset.
@@ -33,7 +34,8 @@ def aggregate_per_customer(df):
     'TCP Retransmission': 'mean',
     'RTT': 'mean',
     'Throughput': 'mean',
-    'Handset Type': lambda x: x.mode()[0]  # Most frequent handset type
+    'Handset Type': lambda x: x.mode()[0],  # Most frequent handset type
+    'Bearer Id': 'first'  # Assuming 'Bearer Id' is unique per customer
   }).reset_index()
 
   return aggregated
