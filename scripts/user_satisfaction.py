@@ -3,9 +3,10 @@ import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
-import mysql.connector
 from dotenv import load_dotenv
 import os
+import mysql.connector
+from mysql.connector import errorcode
 
 less_engaged_center = np.array([1.043550, 107473.680857, 4.306959e+07, 4.534280e+08, 4.964976e+08])  # Sessions Frequency	Total Duration (ms)	Total UL (Bytes)	Total DL (Bytes)	Total Traffic (Bytes)
 worst_experience_center = np.array([42213190, 107.095, 62901.673])  # Cluster 1 from experience_analytics
@@ -46,7 +47,7 @@ def regression_model(data):
 
   predictions = model.predict(features)
   # Calculate RMSE
-  rmse = mean_squared_error(data['satisfaction_score'], predictions, squared=False)
+  rmse = np.sqrt(mean_squared_error(satisfaction, predictions))
   print("Regression Model RMSE:", rmse)
   # Compare predictions to actual scores
   comparison = pd.DataFrame({
@@ -75,16 +76,18 @@ def aggregate_scores(data):
   print(cluster_agg)
   return cluster_agg
 
-# Connect to the database and export the data
-# Get the MySQL credentials from the .env file
+# Load environment variables
+load_dotenv()
+
+# Get the Postgres credentials from the .env file
 host = os.getenv("MYSQL_HOST")
+port = int(os.getenv("MYSQL_PORT"))  # Default port is 5432 if not specified
 user = os.getenv("MYSQL_USER")
 password = os.getenv("MYSQL_PASSWORD")
 database = os.getenv("MYSQL_DATABASE")
+schema = os.getenv("MYSQL_SCHEMA", "public")
 
-def export_to_mysql(data):
-  data = data.where(pd.notnull(data), None)  # replace NaN with None for MySQL
-  
+def export_to_MYSQL(data):
   # Rename columns to be database-friendly
   data = data.rename(columns={
     'Bearer Id': 'Bearer_Id',
@@ -93,39 +96,55 @@ def export_to_mysql(data):
     'experience_score': 'experience_score'
   })
 
-  conn = mysql.connector.connect(
-    host=host,
-    user=user,
-    password=password,
-    database=database
-  )
-  cursor = conn.cursor()
+  # Handle duplicate Bearer Ids by averaging their scores
+  data = data.groupby('Bearer_Id').agg({
+    'engagement_score': 'mean',
+    'experience_score': 'mean',
+    'satisfaction_score': 'mean'
+  }).reset_index()
 
-  # Create table (if not exists)
-  cursor.execute("""
-  CREATE TABLE IF NOT EXISTS user_scores (
-    Bearer_Id FLOAT,
-    engagement_score FLOAT,
-    experience_score FLOAT,
-    satisfaction_score FLOAT
-  )
-  """)
+  # Convert numeric columns to float to ensure compatibility with MySQL
+  data['Bearer_Id'] = data['Bearer_Id'].astype(float)
+  data['engagement_score'] = data['engagement_score'].astype(float)
+  data['experience_score'] = data['experience_score'].astype(float)
+  data['satisfaction_score'] = data['satisfaction_score'].astype(float)
 
-  # Insert data into MySQL table
-  for index, row in data.iterrows():
+  try:
+    # Establish connection to MYSQL
+    conn = mysql.connector.connect(
+      host=host,
+      port=port,
+      user=user,
+      password=password,
+      database=database
+    )
+    cursor = conn.cursor()
+
+    # Create table (if not exists)
     cursor.execute("""
-    INSERT INTO user_scores (Bearer_Id, engagement_score, experience_score, satisfaction_score)
-    VALUES (%s, %s, %s, %s)
-    """, (row['Bearer_Id'], row['engagement_score'], row['experience_score'], row['satisfaction_score']))
+    CREATE TABLE IF NOT EXISTS user_scores (
+      Bearer_Id FLOAT PRIMARY KEY,
+      engagement_score FLOAT,
+      experience_score FLOAT,
+      satisfaction_score FLOAT
+    )
+    """)
 
-  conn.commit()
+    # Use a transaction to reduce the number of commits
+    for _, row in data.iterrows():
+      cursor.execute("""
+      INSERT INTO user_scores (Bearer_Id, engagement_score, experience_score, satisfaction_score)
+      VALUES (%s, %s, %s, %s)
+      ON DUPLICATE KEY UPDATE
+        engagement_score = VALUES(engagement_score),
+        experience_score = VALUES(experience_score),
+        satisfaction_score = VALUES(satisfaction_score)
+      """, (row['Bearer_Id'], row['engagement_score'], row['experience_score'], row['satisfaction_score']))
 
-  # Query the table and display results
-  cursor.execute("SELECT * FROM user_scores LIMIT 10;")
-  result = cursor.fetchall()
-  print("Exported Data (First 10 Rows):")
-  for row in result:
-    print(row)
+    conn.commit()
 
-  cursor.close()
-  conn.close()
+    cursor.close()
+    conn.close()
+
+  except mysql.connector.Error as e:
+    print(f"Error: {e}")
